@@ -21,35 +21,66 @@ def _safe_get(obj: Any, *keys, default=None):
     return cur
 
 
-@register("astrbot_plugin_welcome", "Sunchser", "一个简单的入群欢迎插件", "1.0.1")
+@register("astrbot_plugin_welcome", "Sunchser", "一个简单的入群欢迎插件", "1.1.0")
 class WelcomePlugin(Star):
     """
-    AstrBot 4.19.4 + NapCat(OneBot v11) 入群欢迎插件
-    功能：
-    - 多群分别配置欢迎规则
+    AstrBot 4.19.4 + NapCat
+    基于“入群事件触发动作”的插件架构，改为纯欢迎插件：
     - 支持图文混合欢迎
-    - 支持多条欢迎文案随机发送
-    - 支持多张图片随机发送
-    - 支持可选 @ 新成员
-    - 支持默认欢迎文案/默认图片兜底
     """
 
-    def __init__(self, context: Context, config: dict):
+    def __init__(self, context: Context, config: Optional[dict] = None):
         super().__init__(context)
         self.context = context
-        self.config = config or {}
+        self.config = config or self._load_config_from_context() or {}
         logger.info("[astrbot_plugin_welcome] loaded, config keys=%s", list(self.config.keys()))
+
+    # =========================================================
+    # 配置加载
+    # =========================================================
+    def _load_config_from_context(self) -> Dict[str, Any]:
+        if hasattr(self, "config") and isinstance(getattr(self, "config", None), dict):
+            cfg = getattr(self, "config", None)
+            if cfg:
+                return cfg
+
+        cfg = _safe_get(self.context, "config", default=None)
+        if isinstance(cfg, dict) and cfg:
+            return cfg
+
+        cfg = _safe_get(self.context, "plugin_config", default=None)
+        if isinstance(cfg, dict) and cfg:
+            if "welcome_list" in cfg or "enabled" in cfg:
+                return cfg
+            sub = cfg.get("astrbot_plugin_welcome")
+            if isinstance(sub, dict):
+                return sub
+
+        cfg = _safe_get(self.context, "data", "plugin_config", default=None)
+        if isinstance(cfg, dict) and cfg:
+            if "welcome_list" in cfg or "enabled" in cfg:
+                return cfg
+            sub = cfg.get("astrbot_plugin_welcome")
+            if isinstance(sub, dict):
+                return sub
+
+        return {}
+
+    def _refresh_config(self):
+        if not self.config:
+            cfg = self._load_config_from_context()
+            if isinstance(cfg, dict) and cfg:
+                self.config = cfg
 
     # =========================================================
     # 配置读取
     # =========================================================
-    def _get_rules(self) -> List[Dict[str, Any]]:
-        rules = self.config.get("welcome_list", [])
-        if not isinstance(rules, list):
-            return []
-        return [x for x in rules if isinstance(x, dict)]
+    def _is_global_enabled(self) -> bool:
+        self._refresh_config()
+        return bool(self.config.get("enabled", True))
 
     def _get_default_messages(self) -> List[str]:
+        self._refresh_config()
         msgs = self.config.get("default_welcome_messages", [])
         if not isinstance(msgs, list):
             return ["欢迎 {user_name} 加入本群~"]
@@ -57,10 +88,15 @@ class WelcomePlugin(Star):
         return msgs or ["欢迎 {user_name} 加入本群~"]
 
     def _get_default_image(self) -> str:
+        self._refresh_config()
         return str(self.config.get("default_image", "") or "").strip()
 
-    def _is_global_enabled(self) -> bool:
-        return bool(self.config.get("enabled", True))
+    def _get_rules(self) -> List[Dict[str, Any]]:
+        self._refresh_config()
+        rules = self.config.get("welcome_list", [])
+        if not isinstance(rules, list):
+            return []
+        return [x for x in rules if isinstance(x, dict)]
 
     def _find_rule(self, group_id: str) -> Optional[Dict[str, Any]]:
         gid = str(group_id)
@@ -70,7 +106,7 @@ class WelcomePlugin(Star):
         return None
 
     # =========================================================
-    # 模板渲染
+    # 模板
     # =========================================================
     def _render_template(
         self,
@@ -102,7 +138,6 @@ class WelcomePlugin(Star):
         user_name: str,
         operator_id: str = "",
     ) -> str:
-        # 优先多条随机
         welcome_messages = rule.get("welcome_messages", [])
         if isinstance(welcome_messages, list):
             candidates = [str(x).strip() for x in welcome_messages if str(x).strip()]
@@ -115,7 +150,6 @@ class WelcomePlugin(Star):
                     operator_id=operator_id,
                 )
 
-        # 次选单条
         welcome_text = str(rule.get("welcome_text", "") or "").strip()
         if welcome_text:
             return self._render_template(
@@ -126,7 +160,6 @@ class WelcomePlugin(Star):
                 operator_id=operator_id,
             )
 
-        # 最后全局默认
         defaults = self._get_default_messages()
         return self._render_template(
             random.choice(defaults),
@@ -137,28 +170,22 @@ class WelcomePlugin(Star):
         )
 
     def _pick_image(self, rule: Dict[str, Any]) -> str:
-        # 优先多图随机
         image_urls = rule.get("image_urls", [])
         if isinstance(image_urls, list):
             candidates = [str(x).strip() for x in image_urls if str(x).strip()]
             if candidates:
                 return random.choice(candidates)
 
-        # 次选单图
         image_url = str(rule.get("image_url", "") or "").strip()
         if image_url:
             return image_url
 
-        # 最后全局默认
         return self._get_default_image()
 
     # =========================================================
-    # NapCat / OneBot 事件解析
+    # NapCat 事件解析
     # =========================================================
     def _get_raw_event(self, event: Any) -> Dict[str, Any]:
-        """
-        尽量从 AstrBot 事件对象中拿到 NapCat / OneBot 原始事件
-        """
         raw = _safe_get(event, "message_obj", "raw_message", default=None)
         if isinstance(raw, dict):
             return raw
@@ -167,7 +194,6 @@ class WelcomePlugin(Star):
         if isinstance(raw, dict):
             return raw
 
-        # 兜底：直接从 event 上拼
         possible = {}
         for key in [
             "post_type",
@@ -197,8 +223,6 @@ class WelcomePlugin(Star):
         user_id = str(raw.get("user_id", "") or "")
         operator_id = str(raw.get("operator_id", "") or "")
         sub_type = str(raw.get("sub_type", "") or "")
-
-        # NapCat 的 group_increase 通常不直接给昵称，这里兜底用 user_id
         user_name = user_id or "新朋友"
 
         return {
@@ -210,7 +234,7 @@ class WelcomePlugin(Star):
         }
 
     # =========================================================
-    # 图片路径处理
+    # 图片处理
     # =========================================================
     def _normalize_image(self, image: str) -> str:
         image = str(image or "").strip()
@@ -227,22 +251,18 @@ class WelcomePlugin(Star):
         return image
 
     # =========================================================
-    # 消息发送
+    # 发消息：支持图文混合，不做管理员检查
     # =========================================================
     def _build_cq_message(self, text: str, image: str = "", at_user_id: str = "") -> str:
         parts = []
-
         if at_user_id:
             parts.append(f"[CQ:at,qq={at_user_id}] ")
-
         if image:
             parts.append(f"[CQ:image,file={image}]")
-
         if text:
             if image:
                 parts.append("\n")
             parts.append(text)
-
         return "".join(parts).strip()
 
     async def _send_group_message(self, group_id: str, message: Any) -> bool:
@@ -250,7 +270,6 @@ class WelcomePlugin(Star):
         if bot is None:
             return False
 
-        # 兼容不同 bot 实现
         for method_name in ("send_group_msg", "send_group_message", "send_message"):
             method = getattr(bot, method_name, None)
             if callable(method):
@@ -269,13 +288,12 @@ class WelcomePlugin(Star):
                         logger.warning("[astrbot_plugin_welcome] bot.%s positional failed: %s", method_name, e)
                 except Exception as e:
                     logger.warning("[astrbot_plugin_welcome] bot.%s failed: %s", method_name, e)
-
         return False
 
     async def _send_welcome(self, group_id: str, text: str, image: str = "", at_user_id: str = ""):
         image = self._normalize_image(image)
 
-        # 1. ��尝试结构化消息段
+        # 1. 结构化消息段
         segs = []
         if at_user_id:
             segs.append({"type": "at", "data": {"qq": at_user_id}})
@@ -287,12 +305,12 @@ class WelcomePlugin(Star):
         if segs and await self._send_group_message(group_id, segs):
             return
 
-        # 2. 尝试 CQ 码
+        # 2. CQ码回退
         cq_msg = self._build_cq_message(text=text, image=image, at_user_id=at_user_id)
         if cq_msg and await self._send_group_message(group_id, cq_msg):
             return
 
-        # 3. 纯文本兜底
+        # 3. 纯文本回退
         fallback = text
         if image:
             fallback = f"{text}\n[图片] {image}" if text else f"[图片] {image}"
@@ -300,10 +318,10 @@ class WelcomePlugin(Star):
         if await self._send_group_message(group_id, fallback):
             return
 
-        raise RuntimeError("failed to send welcome message by all strategies")
+        raise RuntimeError("failed to send welcome message")
 
     # =========================================================
-    # 核心欢迎逻辑
+    # 核心逻辑：只欢迎，不禁言，不踢人
     # =========================================================
     async def _handle_welcome(self, event: Any):
         if not self._is_global_enabled():
@@ -324,11 +342,10 @@ class WelcomePlugin(Star):
 
         rule = self._find_rule(group_id)
         if not rule:
-            logger.debug("[astrbot_plugin_welcome] no welcome rule found for group_id=%s", group_id)
+            logger.debug("[astrbot_plugin_welcome] no rule found for group_id=%s", group_id)
             return
 
         if not bool(rule.get("enabled", True)):
-            logger.debug("[astrbot_plugin_welcome] welcome rule disabled for group_id=%s", group_id)
             return
 
         text = self._pick_message(
@@ -342,11 +359,10 @@ class WelcomePlugin(Star):
         at_new_member = bool(rule.get("at_new_member", False))
 
         logger.info(
-            "[astrbot_plugin_welcome] send welcome group_id=%s user_id=%s sub_type=%s operator_id=%s",
+            "[astrbot_plugin_welcome] welcome group_id=%s user_id=%s sub_type=%s",
             group_id,
             user_id,
             info["sub_type"],
-            operator_id,
         )
 
         await self._send_welcome(
