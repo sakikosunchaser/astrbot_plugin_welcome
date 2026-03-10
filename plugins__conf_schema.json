@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "title": "多群欢迎配置",
+  "description": "每个群欢迎文字和图片独立设置",
+  "properties": {
+    "welcome_config": {
+      "type": "object",
+      "title": "群配置",
+      "description": "每个群一个欢迎设置（key为群号字符串）",
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "title": "欢迎文字",
+              "description": "该群的欢迎文字，支持多行"
+            },
+            "image": {
+              "type": "string",
+              "title": "欢迎图片路径",
+              "description": "本地图片（如 data/welcome.jpg）"
+            }
+          },
+          "required": []
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
