@@ -1,31 +1,76 @@
 {
-  "type": "object",
-  "title": "多群欢迎配置",
-  "description": "每个群欢迎文字和图片独立设置",
-  "properties": {
-    "welcome_config": {
+  "enabled": {
+    "description": "是否启用入群欢迎插件",
+    "type": "bool",
+    "default": true
+  },
+  "default_image": {
+    "description": "默认欢迎图片，可为空。支持公网 URL 或插件目录下相对路径",
+    "type": "string",
+    "default": "",
+    "hint": "例如：https://example.com/welcome.jpg 或 images/welcome.png"
+  },
+  "default_welcome_messages": {
+    "description": "默认欢迎文案列表。当某个群未单独设置 welcome_text / welcome_messages 时使用",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": [
+      "欢迎 {user_name} 加入本群~",
+      "欢迎新朋友 {user_name}，请先阅读群公告~"
+    ]
+  },
+  "welcome_list": {
+    "description": "多群欢迎配置",
+    "type": "list",
+    "items": {
       "type": "object",
-      "title": "群配置",
-      "description": "每个群一个欢迎设置（key为群号字符串）",
-      "patternProperties": {
-        "^[0-9]+$": {
-          "type": "object",
-          "properties": {
-            "text": {
-              "type": "string",
-              "title": "欢迎文字",
-              "description": "该群的欢迎文字，支持多行"
-            },
-            "image": {
-              "type": "string",
-              "title": "欢迎图片路径",
-              "description": "本地图片（如 data/welcome.jpg）"
-            }
+      "items": {
+        "enabled": {
+          "description": "是否启用该群欢迎配置",
+          "type": "bool",
+          "default": true
+        },
+        "group_id": {
+          "description": "群号",
+          "type": "string",
+          "default": "",
+          "hint": "例如：123456789"
+        },
+        "at_new_member": {
+          "description": "发送欢迎时是否 @ 新成员",
+          "type": "bool",
+          "default": false
+        },
+        "welcome_text": {
+          "description": "单条欢迎文案。支持变量：{user_name} {user_id} {group_id} {operator_id}",
+          "type": "string",
+          "default": "欢迎 {user_name} 加入本群~"
+        },
+        "welcome_messages": {
+          "description": "多条欢迎文案，发送时随机选一条；若填写则优先于 welcome_text",
+          "type": "list",
+          "items": {
+            "type": "string"
           },
-          "required": []
+          "default": []
+        },
+        "image_url": {
+          "description": "单张欢迎图片地址，可为空。支持公网 URL 或相对路径",
+          "type": "string",
+          "default": ""
+        },
+        "image_urls": {
+          "description": "多张欢迎图片地址，发送时随机选一张；若填写则优先于 image_url",
+          "type": "list",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
-      },
-      "additionalProperties": false
-    }
+      }
+    },
+    "default": []
   }
 }
