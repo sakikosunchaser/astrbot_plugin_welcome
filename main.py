@@ -1,5 +1,4 @@
 import os
-import random
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -21,22 +20,16 @@ def _safe_get(obj: Any, *keys, default=None):
     return cur
 
 
-@register("astrbot_plugin_welcome", "Sunchser", "一个简单的入群欢迎插件", "1.1.0")
+@register("astrbot_plugin_welcome", "Sunchser", "一个简单的入群欢迎插件", "1.2.0")
 class WelcomePlugin(Star):
-    """
-    AstrBot 4.19.4 + NapCat
-    基于“入群事件触发动作”的插件架构，改为纯欢迎插件：
-    - 支持图文混合欢迎
-    """
-
     def __init__(self, context: Context, config: Optional[dict] = None):
         super().__init__(context)
         self.context = context
         self.config = config or self._load_config_from_context() or {}
-        logger.info("[astrbot_plugin_welcome] loaded, config keys=%s", list(self.config.keys()))
+        logger.info("[astrbot_plugin_welcome] loaded")
 
     # =========================================================
-    # 配置加载
+    # 配置
     # =========================================================
     def _load_config_from_context(self) -> Dict[str, Any]:
         if hasattr(self, "config") and isinstance(getattr(self, "config", None), dict):
@@ -72,24 +65,9 @@ class WelcomePlugin(Star):
             if isinstance(cfg, dict) and cfg:
                 self.config = cfg
 
-    # =========================================================
-    # 配置读取
-    # =========================================================
-    def _is_global_enabled(self) -> bool:
+    def _is_enabled(self) -> bool:
         self._refresh_config()
         return bool(self.config.get("enabled", True))
-
-    def _get_default_messages(self) -> List[str]:
-        self._refresh_config()
-        msgs = self.config.get("default_welcome_messages", [])
-        if not isinstance(msgs, list):
-            return ["欢迎 {user_name} 加入本群~"]
-        msgs = [str(x).strip() for x in msgs if str(x).strip()]
-        return msgs or ["欢迎 {user_name} 加入本群~"]
-
-    def _get_default_image(self) -> str:
-        self._refresh_config()
-        return str(self.config.get("default_image", "") or "").strip()
 
     def _get_rules(self) -> List[Dict[str, Any]]:
         self._refresh_config()
@@ -106,84 +84,7 @@ class WelcomePlugin(Star):
         return None
 
     # =========================================================
-    # 模板
-    # =========================================================
-    def _render_template(
-        self,
-        template: str,
-        *,
-        group_id: str,
-        user_id: str,
-        user_name: str,
-        operator_id: str = "",
-    ) -> str:
-        text = template or "欢迎 {user_name} 加入本群~"
-        mapping = {
-            "{group_id}": str(group_id or ""),
-            "{user_id}": str(user_id or ""),
-            "{user_name}": str(user_name or "新朋友"),
-            "{nickname}": str(user_name or "新朋友"),
-            "{operator_id}": str(operator_id or ""),
-        }
-        for k, v in mapping.items():
-            text = text.replace(k, v)
-        return text
-
-    def _pick_message(
-        self,
-        rule: Dict[str, Any],
-        *,
-        group_id: str,
-        user_id: str,
-        user_name: str,
-        operator_id: str = "",
-    ) -> str:
-        welcome_messages = rule.get("welcome_messages", [])
-        if isinstance(welcome_messages, list):
-            candidates = [str(x).strip() for x in welcome_messages if str(x).strip()]
-            if candidates:
-                return self._render_template(
-                    random.choice(candidates),
-                    group_id=group_id,
-                    user_id=user_id,
-                    user_name=user_name,
-                    operator_id=operator_id,
-                )
-
-        welcome_text = str(rule.get("welcome_text", "") or "").strip()
-        if welcome_text:
-            return self._render_template(
-                welcome_text,
-                group_id=group_id,
-                user_id=user_id,
-                user_name=user_name,
-                operator_id=operator_id,
-            )
-
-        defaults = self._get_default_messages()
-        return self._render_template(
-            random.choice(defaults),
-            group_id=group_id,
-            user_id=user_id,
-            user_name=user_name,
-            operator_id=operator_id,
-        )
-
-    def _pick_image(self, rule: Dict[str, Any]) -> str:
-        image_urls = rule.get("image_urls", [])
-        if isinstance(image_urls, list):
-            candidates = [str(x).strip() for x in image_urls if str(x).strip()]
-            if candidates:
-                return random.choice(candidates)
-
-        image_url = str(rule.get("image_url", "") or "").strip()
-        if image_url:
-            return image_url
-
-        return self._get_default_image()
-
-    # =========================================================
-    # NapCat 事件解析
+    # 事件解析
     # =========================================================
     def _get_raw_event(self, event: Any) -> Dict[str, Any]:
         raw = _safe_get(event, "message_obj", "raw_message", default=None)
@@ -195,15 +96,7 @@ class WelcomePlugin(Star):
             return raw
 
         possible = {}
-        for key in [
-            "post_type",
-            "notice_type",
-            "sub_type",
-            "group_id",
-            "user_id",
-            "operator_id",
-            "self_id",
-        ]:
+        for key in ["post_type", "notice_type", "sub_type", "group_id", "user_id", "operator_id"]:
             value = _safe_get(event, key, default=None)
             if value is not None:
                 possible[key] = value
@@ -218,24 +111,26 @@ class WelcomePlugin(Star):
 
     def _extract_event_info(self, event: Any) -> Dict[str, str]:
         raw = self._get_raw_event(event)
-
-        group_id = str(raw.get("group_id", "") or "")
-        user_id = str(raw.get("user_id", "") or "")
-        operator_id = str(raw.get("operator_id", "") or "")
-        sub_type = str(raw.get("sub_type", "") or "")
-        user_name = user_id or "新朋友"
-
         return {
-            "group_id": group_id,
-            "user_id": user_id,
-            "operator_id": operator_id,
-            "sub_type": sub_type,
-            "user_name": user_name,
+            "group_id": str(raw.get("group_id", "") or ""),
+            "user_id": str(raw.get("user_id", "") or ""),
+            "operator_id": str(raw.get("operator_id", "") or ""),
+            "sub_type": str(raw.get("sub_type", "") or ""),
+            "user_name": str(raw.get("user_id", "") or "新朋友"),
         }
 
     # =========================================================
-    # 图片处理
+    # 消息处理
     # =========================================================
+    def _render_text(self, template: str, group_id: str, user_id: str, user_name: str) -> str:
+        text = template or "欢迎新成员加入本群~"
+        return (
+            text.replace("{group_id}", str(group_id or ""))
+            .replace("{user_id}", str(user_id or ""))
+            .replace("{user_name}", str(user_name or "新朋友"))
+            .replace("{nickname}", str(user_name or "新朋友"))
+        )
+
     def _normalize_image(self, image: str) -> str:
         image = str(image or "").strip()
         if not image:
@@ -250,13 +145,8 @@ class WelcomePlugin(Star):
 
         return image
 
-    # =========================================================
-    # 发消息：支持图文混合，不做管理员检查
-    # =========================================================
-    def _build_cq_message(self, text: str, image: str = "", at_user_id: str = "") -> str:
+    def _build_cq_message(self, text: str, image: str = "") -> str:
         parts = []
-        if at_user_id:
-            parts.append(f"[CQ:at,qq={at_user_id}] ")
         if image:
             parts.append(f"[CQ:image,file={image}]")
         if text:
@@ -288,15 +178,13 @@ class WelcomePlugin(Star):
                         logger.warning("[astrbot_plugin_welcome] bot.%s positional failed: %s", method_name, e)
                 except Exception as e:
                     logger.warning("[astrbot_plugin_welcome] bot.%s failed: %s", method_name, e)
+
         return False
 
-    async def _send_welcome(self, group_id: str, text: str, image: str = "", at_user_id: str = ""):
+    async def _send_welcome(self, group_id: str, text: str, image: str = ""):
         image = self._normalize_image(image)
 
-        # 1. 结构化消息段
         segs = []
-        if at_user_id:
-            segs.append({"type": "at", "data": {"qq": at_user_id}})
         if image:
             segs.append({"type": "image", "data": {"file": image}})
         if text:
@@ -305,12 +193,10 @@ class WelcomePlugin(Star):
         if segs and await self._send_group_message(group_id, segs):
             return
 
-        # 2. CQ码回退
-        cq_msg = self._build_cq_message(text=text, image=image, at_user_id=at_user_id)
+        cq_msg = self._build_cq_message(text=text, image=image)
         if cq_msg and await self._send_group_message(group_id, cq_msg):
             return
 
-        # 3. 纯文本回退
         fallback = text
         if image:
             fallback = f"{text}\n[图片] {image}" if text else f"[图片] {image}"
@@ -321,10 +207,10 @@ class WelcomePlugin(Star):
         raise RuntimeError("failed to send welcome message")
 
     # =========================================================
-    # 核心逻辑：只欢迎，不禁言，不踢人
+    # 核心逻辑
     # =========================================================
     async def _handle_welcome(self, event: Any):
-        if not self._is_global_enabled():
+        if not self._is_enabled():
             return
 
         if not self._is_group_increase(event):
@@ -333,44 +219,25 @@ class WelcomePlugin(Star):
         info = self._extract_event_info(event)
         group_id = info["group_id"]
         user_id = info["user_id"]
-        operator_id = info["operator_id"]
         user_name = info["user_name"]
 
         if not group_id or not user_id:
-            logger.warning("[astrbot_plugin_welcome] invalid group increase event: %s", info)
             return
 
         rule = self._find_rule(group_id)
         if not rule:
-            logger.debug("[astrbot_plugin_welcome] no rule found for group_id=%s", group_id)
             return
 
-        if not bool(rule.get("enabled", True)):
-            return
-
-        text = self._pick_message(
-            rule,
+        text = self._render_text(
+            str(rule.get("welcome_text", "") or ""),
             group_id=group_id,
             user_id=user_id,
-            user_name=user_name,
-            operator_id=operator_id,
+            user_name=user_name
         )
-        image = self._pick_image(rule)
-        at_new_member = bool(rule.get("at_new_member", False))
+        image = str(rule.get("image_url", "") or "").strip()
 
-        logger.info(
-            "[astrbot_plugin_welcome] welcome group_id=%s user_id=%s sub_type=%s",
-            group_id,
-            user_id,
-            info["sub_type"],
-        )
-
-        await self._send_welcome(
-            group_id=group_id,
-            text=text,
-            image=image,
-            at_user_id=user_id if at_new_member else "",
-        )
+        logger.info("[astrbot_plugin_welcome] welcome group_id=%s user_id=%s", group_id, user_id)
+        await self._send_welcome(group_id=group_id, text=text, image=image)
 
     # =========================================================
     # 监听
@@ -385,43 +252,6 @@ class WelcomePlugin(Star):
     # =========================================================
     # 调试命令
     # =========================================================
-    @filter.command("welcome_test")
-    async def welcome_test(self, event: AstrMessageEvent):
-        try:
-            group_id = str(event.get_group_id() or "")
-        except Exception:
-            group_id = str(_safe_get(event, "message_obj", "group_id", default="") or "")
-
-        if not group_id:
-            yield event.plain_result("当前不在群聊中，无法测试。")
-            return
-
-        rule = self._find_rule(group_id)
-        if not rule:
-            yield event.plain_result(f"当前群 {group_id} 未配置欢迎规则。")
-            return
-
-        text = self._pick_message(
-            rule,
-            group_id=group_id,
-            user_id="10000",
-            user_name="测试用户",
-            operator_id="0",
-        )
-        image = self._pick_image(rule)
-        at_new_member = bool(rule.get("at_new_member", False))
-
-        try:
-            await self._send_welcome(
-                group_id=group_id,
-                text=f"[测试欢迎]\n{text}",
-                image=image,
-                at_user_id="10000" if at_new_member else "",
-            )
-            yield event.plain_result("测试欢迎消息已发送，请查看群内。")
-        except Exception as e:
-            yield event.plain_result(f"测试发送失败：{e}")
-
     @filter.command("welcome_show")
     async def welcome_show(self, event: AstrMessageEvent):
         try:
@@ -439,12 +269,42 @@ class WelcomePlugin(Star):
             return
 
         summary = {
-            "enabled": rule.get("enabled", True),
             "group_id": rule.get("group_id", ""),
-            "at_new_member": rule.get("at_new_member", False),
             "welcome_text": rule.get("welcome_text", ""),
-            "welcome_messages": rule.get("welcome_messages", []),
             "image_url": rule.get("image_url", ""),
-            "image_urls": rule.get("image_urls", []),
         }
         yield event.plain_result(f"当前群欢迎配置：{summary}")
+
+    @filter.command("welcome_test")
+    async def welcome_test(self, event: AstrMessageEvent):
+        try:
+            group_id = str(event.get_group_id() or "")
+        except Exception:
+            group_id = str(_safe_get(event, "message_obj", "group_id", default="") or "")
+
+        if not group_id:
+            yield event.plain_result("当前不在群聊中，无法测试。")
+            return
+
+        rule = self._find_rule(group_id)
+        if not rule:
+            yield event.plain_result(f"当前群 {group_id} 未配置欢迎规则。")
+            return
+
+        text = self._render_text(
+            str(rule.get("welcome_text", "") or ""),
+            group_id=group_id,
+            user_id="10000",
+            user_name="测试用户"
+        )
+        image = str(rule.get("image_url", "") or "").strip()
+
+        try:
+            await self._send_welcome(
+                group_id=group_id,
+                text=f"[测试欢迎]\n{text}",
+                image=image
+            )
+            yield event.plain_result("测试欢迎消息已发送，请查看群内。")
+        except Exception as e:
+            yield event.plain_result(f"测试发送失败：{e}")
