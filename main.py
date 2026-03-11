@@ -7,6 +7,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api.event import filter, AstrMessageEvent
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def _safe_get(obj: Any, *keys, default=None):
@@ -21,17 +22,14 @@ def _safe_get(obj: Any, *keys, default=None):
     return cur
 
 
-@register("astrbot_plugin_welcome", "Sunchser", "一个简单的入群欢迎插件", "1.3.0")
+@register("astrbot_plugin_welcome", "Sunchser", "一个简单的入群欢迎插件", "1.3.1")
 class WelcomePlugin(Star):
     def __init__(self, context: Context, config: Optional[dict] = None):
         super().__init__(context)
         self.context = context
         self.config = config or {}
-        logger.info("[astrbot_plugin_welcome] loaded")
+        logger.info("[welcome-debug] plugin loaded")
 
-    # =========================================================
-    # 配置读取
-    # =========================================================
     def _refresh_config(self):
         if self.config:
             return
@@ -79,7 +77,7 @@ class WelcomePlugin(Star):
             if isinstance(data, list):
                 return [x for x in data if isinstance(x, dict)]
         except Exception as e:
-            logger.warning("[astrbot_plugin_welcome] welcome_config_json parse failed: %s", e)
+            logger.warning("[welcome-debug] welcome_config_json parse failed: %s", e)
 
         return []
 
@@ -90,9 +88,6 @@ class WelcomePlugin(Star):
                 return rule
         return None
 
-    # =========================================================
-    # NapCat 事件
-    # =========================================================
     def _get_raw_event(self, event: Any) -> Dict[str, Any]:
         raw = _safe_get(event, "message_obj", "raw_message", default=None)
         if isinstance(raw, dict):
@@ -103,7 +98,7 @@ class WelcomePlugin(Star):
             return raw
 
         possible = {}
-        for key in ["post_type", "notice_type", "sub_type", "group_id", "user_id"]:
+        for key in ["post_type", "notice_type", "sub_type", "group_id", "user_id", "operator_id"]:
             value = _safe_get(event, key, default=None)
             if value is not None:
                 possible[key] = value
@@ -116,9 +111,6 @@ class WelcomePlugin(Star):
             and str(raw.get("notice_type", "")) == "group_increase"
         )
 
-    # =========================================================
-    # 文本/图片
-    # =========================================================
     def _render_text(self, template: str, group_id: str, user_id: str) -> str:
         user_name = user_id or "新朋友"
         text = template or "欢迎 {user_name} 加入本群~"
@@ -155,6 +147,7 @@ class WelcomePlugin(Star):
     async def _send_group_message(self, group_id: str, message: Any) -> bool:
         bot = getattr(self.context, "bot", None)
         if bot is None:
+            logger.warning("[welcome-debug] context.bot is None")
             return False
 
         for method_name in ("send_group_msg", "send_group_message", "send_message"):
@@ -164,17 +157,20 @@ class WelcomePlugin(Star):
                     result = method(group_id=group_id, message=message)
                     if hasattr(result, "__await__"):
                         await result
+                    logger.info("[welcome-debug] send success via %s", method_name)
                     return True
                 except TypeError:
                     try:
                         result = method(group_id, message)
                         if hasattr(result, "__await__"):
                             await result
+                        logger.info("[welcome-debug] send success via %s(positional)", method_name)
                         return True
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    except Exception as e:
+                        logger.warning("[welcome-debug] %s positional failed: %s", method_name, e)
+                except Exception as e:
+                    logger.warning("[welcome-debug] %s failed: %s", method_name, e)
+
         return False
 
     async def _send_welcome(self, group_id: str, text: str, image: str = ""):
@@ -202,28 +198,36 @@ class WelcomePlugin(Star):
 
         raise RuntimeError("failed to send welcome message")
 
-    # =========================================================
-    # 核心逻辑
-    # =========================================================
     async def _handle_welcome(self, event: Any):
         if not self._is_enabled():
-            return
-        if not self._is_group_increase(event):
+            logger.info("[welcome-debug] plugin disabled")
             return
 
         raw = self._get_raw_event(event)
+        logger.info("[welcome-debug] raw event snapshot: %s", raw)
+
+        if not self._is_group_increase(event):
+            return
+
+        logger.info("[welcome-debug] group_increase detected")
+
         group_id = str(raw.get("group_id", "") or "")
         user_id = str(raw.get("user_id", "") or "")
 
         if not group_id or not user_id:
+            logger.warning("[welcome-debug] missing group_id or user_id")
             return
 
         rule = self._find_rule(group_id)
+        logger.info("[welcome-debug] matched rule: %s", rule)
+
         if not rule:
             return
 
         text = self._render_text(str(rule.get("welcome_text", "") or ""), group_id, user_id)
         image = str(rule.get("image_url", "") or "").strip()
+
+        logger.info("[welcome-debug] sending welcome, group_id=%s user_id=%s image=%s", group_id, user_id, image)
 
         await self._send_welcome(group_id=group_id, text=text, image=image)
 
@@ -232,7 +236,11 @@ class WelcomePlugin(Star):
         try:
             await self._handle_welcome(event)
         except Exception as e:
-            logger.exception("[astrbot_plugin_welcome] handle event failed: %s", e)
+            logger.exception("[welcome-debug] handle event failed: %s", e)
+
+    @filter.command("welcome_ping")
+    async def welcome_ping(self, event: AstrMessageEvent):
+        yield event.plain_result("welcome plugin alive")
 
     @filter.command("welcome_show")
     async def welcome_show(self, event: AstrMessageEvent):
@@ -241,17 +249,5 @@ class WelcomePlugin(Star):
         except Exception:
             group_id = str(_safe_get(event, "message_obj", "group_id", default="") or "")
 
-        if not group_id:
-            yield event.plain_result("当前不在群聊中。")
-            return
-
-        rule = self._find_rule(group_id)
-        if not rule:
-            yield event.plain_result(f"当前群 {group_id} 未配置欢迎规则。")
-            return
-
-        yield event.plain_result(
-            f"当前群欢迎配置：group_id={rule.get('group_id', '')}, "
-            f"welcome_text={rule.get('welcome_text', '')}, "
-            f"image_url={rule.get('image_url', '')}"
-        )
+        rules = self._get_rules()
+        yield event.plain_result(f"group_id={group_id}, rules={rules}")
