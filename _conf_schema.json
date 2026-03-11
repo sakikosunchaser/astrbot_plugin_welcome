@@ -7,7 +7,7 @@
   "welcome_config_json": {
     "description": "多群欢迎配置(JSON)",
     "type": "text",
-    "hint": "请填写 JSON 数组。每项包含 group_id、welcome_text、image_url。例如：[{\"group_id\":\"1044962036\",\"welcome_text\":\"欢迎 {user_name} 加入本群~\",\"image_url\":\"https://example.com/a.jpg\"}]",
-    "default": "[\n  {\n    \"group_id\": \"1044962036\",\n    \"welcome_text\": \"欢迎 {user_name} 加入本群~\",\n    \"image_url\": \"\"\n  }\n]"
+    "hint": "请填写 JSON 数组。每项包含 group_id、welcome_text、image_url。",
+    "default": "[\n  {\n    \"group_id\": \"1019656852\",\n    \"welcome_text\": \"欢迎 {user_name} 加入本群~\\n请先阅读群公告。\",\n    \"image_url\": \"welcome.png\"\n  }\n]"
   }
 }

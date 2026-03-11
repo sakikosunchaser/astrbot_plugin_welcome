@@ -26,7 +26,7 @@ def _safe_get(obj: Any, *keys, default=None):
     return cur
 
 
-@register(PLUGIN_NAME, "Sunchser", "一个简单的入群欢迎插件", "1.4.2")
+@register(PLUGIN_NAME, "Sunchser", "一个简单的入群欢迎插件", "1.5.0")
 class WelcomePlugin(Star):
     def __init__(self, context: Context, config: Optional[dict] = None):
         super().__init__(context)
