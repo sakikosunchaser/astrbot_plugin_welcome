@@ -9,6 +9,8 @@ from astrbot.api.event import filter, AstrMessageEvent
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+PLUGIN_NAME = "astrbot_plugin_welcome"
+
 
 def _safe_get(obj: Any, *keys, default=None):
     cur = obj
@@ -22,7 +24,7 @@ def _safe_get(obj: Any, *keys, default=None):
     return cur
 
 
-@register("astrbot_plugin_welcome", "Sunchser", "一个简单的入群欢迎插件", "1.3.1")
+@register(PLUGIN_NAME, "Sunchser", "一个简单的入群欢迎插件", "1.3.2")
 class WelcomePlugin(Star):
     def __init__(self, context: Context, config: Optional[dict] = None):
         super().__init__(context)
@@ -30,29 +32,93 @@ class WelcomePlugin(Star):
         self.config = config or {}
         logger.info("[welcome-debug] plugin loaded")
 
-    def _refresh_config(self):
-        if self.config:
-            return
+    # =========================================================
+    # 配置读取
+    # =========================================================
+    def _get_plugin_root(self) -> str:
+        return os.path.dirname(os.path.abspath(__file__))
 
+    def _get_config_file_candidates(self) -> List[str]:
+        """
+        优先尝试几个常见配置文件位置
+        """
+        plugin_root = self._get_plugin_root()
+
+        candidates = [
+            os.path.abspath(os.path.join(plugin_root, "..", "..", "config", f"{PLUGIN_NAME}_config.json")),
+            os.path.abspath(os.path.join(plugin_root, "..", "..", "..", "config", f"{PLUGIN_NAME}_config.json")),
+            os.path.abspath(os.path.join(os.getcwd(), "data", "config", f"{PLUGIN_NAME}_config.json")),
+            os.path.abspath(os.path.join(os.getcwd(), "config", f"{PLUGIN_NAME}_config.json")),
+        ]
+        return candidates
+
+    def _load_config_from_file(self) -> Dict[str, Any]:
+        for path in self._get_config_file_candidates():
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        logger.info("[welcome-debug] config loaded from file: %s", path)
+                        return data
+                except Exception as e:
+                    logger.warning("[welcome-debug] failed to read config file %s: %s", path, e)
+        return {}
+
+    def _load_config_from_context(self) -> Dict[str, Any]:
+        # 方式1：context.plugin_config
         cfg = _safe_get(self.context, "plugin_config", default=None)
         if isinstance(cfg, dict):
             if "welcome_config_json" in cfg or "enabled" in cfg:
-                self.config = cfg
-                return
-            sub = cfg.get("astrbot_plugin_welcome")
+                logger.info("[welcome-debug] config loaded from context.plugin_config")
+                return cfg
+            sub = cfg.get(PLUGIN_NAME)
             if isinstance(sub, dict):
-                self.config = sub
-                return
+                logger.info("[welcome-debug] config loaded from context.plugin_config.%s", PLUGIN_NAME)
+                return sub
 
+        # 方式2：context.data.plugin_config
         cfg = _safe_get(self.context, "data", "plugin_config", default=None)
         if isinstance(cfg, dict):
             if "welcome_config_json" in cfg or "enabled" in cfg:
-                self.config = cfg
-                return
-            sub = cfg.get("astrbot_plugin_welcome")
+                logger.info("[welcome-debug] config loaded from context.data.plugin_config")
+                return cfg
+            sub = cfg.get(PLUGIN_NAME)
             if isinstance(sub, dict):
-                self.config = sub
-                return
+                logger.info("[welcome-debug] config loaded from context.data.plugin_config.%s", PLUGIN_NAME)
+                return sub
+
+        # 方式3：context.config
+        cfg = _safe_get(self.context, "config", default=None)
+        if isinstance(cfg, dict):
+            if "welcome_config_json" in cfg or "enabled" in cfg:
+                logger.info("[welcome-debug] config loaded from context.config")
+                return cfg
+            sub = cfg.get(PLUGIN_NAME)
+            if isinstance(sub, dict):
+                logger.info("[welcome-debug] config loaded from context.config.%s", PLUGIN_NAME)
+                return sub
+
+        return {}
+
+    def _refresh_config(self):
+        # 优先已有 config
+        if isinstance(self.config, dict) and self.config:
+            return
+
+        # 再尝试 context
+        cfg = self._load_config_from_context()
+        if cfg:
+            self.config = cfg
+            return
+
+        # 最后直接读配置文件
+        cfg = self._load_config_from_file()
+        if cfg:
+            self.config = cfg
+            return
+
+        self.config = {}
 
     def _is_enabled(self) -> bool:
         self._refresh_config()
@@ -62,10 +128,16 @@ class WelcomePlugin(Star):
         self._refresh_config()
         raw = self.config.get("welcome_config_json", "[]")
 
+        logger.info("[welcome-debug] current config = %s", self.config)
+        logger.info("[welcome-debug] welcome_config_json raw = %r", raw)
+
         if isinstance(raw, list):
-            return [x for x in raw if isinstance(x, dict)]
+            rules = [x for x in raw if isinstance(x, dict)]
+            logger.info("[welcome-debug] parsed rules from list = %s", rules)
+            return rules
 
         if not isinstance(raw, str):
+            logger.warning("[welcome-debug] welcome_config_json is not str/list, got %s", type(raw))
             return []
 
         raw = raw.strip()
@@ -75,7 +147,9 @@ class WelcomePlugin(Star):
         try:
             data = json.loads(raw)
             if isinstance(data, list):
-                return [x for x in data if isinstance(x, dict)]
+                rules = [x for x in data if isinstance(x, dict)]
+                logger.info("[welcome-debug] parsed rules from json = %s", rules)
+                return rules
         except Exception as e:
             logger.warning("[welcome-debug] welcome_config_json parse failed: %s", e)
 
@@ -88,6 +162,9 @@ class WelcomePlugin(Star):
                 return rule
         return None
 
+    # =========================================================
+    # 事件
+    # =========================================================
     def _get_raw_event(self, event: Any) -> Dict[str, Any]:
         raw = _safe_get(event, "message_obj", "raw_message", default=None)
         if isinstance(raw, dict):
@@ -98,7 +175,7 @@ class WelcomePlugin(Star):
             return raw
 
         possible = {}
-        for key in ["post_type", "notice_type", "sub_type", "group_id", "user_id", "operator_id"]:
+        for key in ["post_type", "notice_type", "sub_type", "group_id", "user_id"]:
             value = _safe_get(event, key, default=None)
             if value is not None:
                 possible[key] = value
@@ -111,6 +188,9 @@ class WelcomePlugin(Star):
             and str(raw.get("notice_type", "")) == "group_increase"
         )
 
+    # =========================================================
+    # 文本/图片
+    # =========================================================
     def _render_text(self, template: str, group_id: str, user_id: str) -> str:
         user_name = user_id or "新朋友"
         text = template or "欢迎 {user_name} 加入本群~"
@@ -130,7 +210,7 @@ class WelcomePlugin(Star):
             return image
 
         if not os.path.isabs(image):
-            base_dir = os.path.dirname(os.path.abspath(__file__))
+            base_dir = self._get_plugin_root()
             image = os.path.abspath(os.path.join(base_dir, image))
         return image
 
@@ -198,6 +278,9 @@ class WelcomePlugin(Star):
 
         raise RuntimeError("failed to send welcome message")
 
+    # =========================================================
+    # 核心逻辑
+    # =========================================================
     async def _handle_welcome(self, event: Any):
         if not self._is_enabled():
             logger.info("[welcome-debug] plugin disabled")
@@ -228,7 +311,6 @@ class WelcomePlugin(Star):
         image = str(rule.get("image_url", "") or "").strip()
 
         logger.info("[welcome-debug] sending welcome, group_id=%s user_id=%s image=%s", group_id, user_id, image)
-
         await self._send_welcome(group_id=group_id, text=text, image=image)
 
     @filter.event_message_type(filter.EventMessageType.ALL)
@@ -238,10 +320,6 @@ class WelcomePlugin(Star):
         except Exception as e:
             logger.exception("[welcome-debug] handle event failed: %s", e)
 
-    @filter.command("welcome_ping")
-    async def welcome_ping(self, event: AstrMessageEvent):
-        yield event.plain_result("welcome plugin alive")
-
     @filter.command("welcome_show")
     async def welcome_show(self, event: AstrMessageEvent):
         try:
@@ -250,4 +328,8 @@ class WelcomePlugin(Star):
             group_id = str(_safe_get(event, "message_obj", "group_id", default="") or "")
 
         rules = self._get_rules()
-        yield event.plain_result(f"group_id={group_id}, rules={rules}")
+        yield event.plain_result(
+            f"group_id={group_id}\n"
+            f"config={self.config}\n"
+            f"rules={rules}"
+        )
