@@ -4,32 +4,10 @@
     "type": "bool",
     "default": true
   },
-  "welcome_list": {
-    "description": "每个群分别设置欢迎消息和欢迎图片",
-    "type": "list",
-    "items": {
-      "type": "object",
-      "items": {
-        "group_id": {
-          "description": "群号",
-          "type": "string",
-          "default": "",
-          "hint": "例如：1044962036"
-        },
-        "welcome_text": {
-          "description": "对应的欢迎消息",
-          "type": "string",
-          "default": "欢迎 {user_name} 加入本群~",
-          "hint": "支持变量：{user_name} {user_id} {group_id}"
-        },
-        "image_url": {
-          "description": "对应的欢迎图片",
-          "type": "string",
-          "default": "",
-          "hint": "支持公网 URL 或插件目录下相对路径"
-        }
-      }
-    },
-    "default": []
+  "welcome_config_json": {
+    "description": "多群欢迎配置(JSON)",
+    "type": "text",
+    "hint": "请填写 JSON 数组。每项包含 group_id、welcome_text、image_url。例如：[{\"group_id\":\"1044962036\",\"welcome_text\":\"欢迎 {user_name} 加入本群~\",\"image_url\":\"https://example.com/a.jpg\"}]",
+    "default": "[\n  {\n    \"group_id\": \"1044962036\",\n    \"welcome_text\": \"欢迎 {user_name} 加入本群~\",\n    \"image_url\": \"\"\n  }\n]"
   }
 }
