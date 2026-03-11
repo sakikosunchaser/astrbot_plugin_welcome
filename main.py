@@ -1,3 +1,4 @@
+import os
 import json
 import re
 from collections.abc import AsyncGenerator
@@ -31,7 +32,7 @@ high_priority_event = _high_priority(filter.event_message_type)
     "astrbot_plugin_welcome",
     "Sunchser",
     "一个简单的入群欢迎插件",
-    "v2.0.0",
+    "v2.0.1",
 )
 class WelcomePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -39,9 +40,6 @@ class WelcomePlugin(Star):
         self.context = context
         self.config = config or {}
 
-    # =========================================================
-    # 配置读取
-    # =========================================================
     def _is_enabled(self) -> bool:
         return bool(self.config.get("enabled", True))
 
@@ -113,9 +111,20 @@ class WelcomePlugin(Star):
             .replace("{nickname}", str(user_name))
         )
 
-    # =========================================================
-    # 监听入群事件
-    # =========================================================
+    def _normalize_image_path(self, image_url: str) -> str:
+        image_url = str(image_url or "").strip()
+        if not image_url:
+            return ""
+
+        if image_url.startswith("http://") or image_url.startswith("https://"):
+            return image_url
+
+        if os.path.isabs(image_url):
+            return image_url
+
+        plugin_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.abspath(os.path.join(plugin_dir, image_url))
+
     @high_priority_event(filter.EventMessageType.ALL)
     async def handle_group_increase(
         self, event: AiocqhttpMessageEvent
@@ -155,10 +164,11 @@ class WelcomePlugin(Star):
                 chain = []
 
                 if image_url:
-                    if image_url.startswith("http://") or image_url.startswith("https://"):
-                        chain.append(Comp.Image.fromURL(image_url))
+                    final_image = self._normalize_image_path(image_url)
+                    if final_image.startswith("http://") or final_image.startswith("https://"):
+                        chain.append(Comp.Image.fromURL(final_image))
                     else:
-                        chain.append(Comp.Image.fromFileSystem(image_url))
+                        chain.append(Comp.Image.fromFileSystem(final_image))
 
                 chain.append(Comp.Plain(welcome_text))
 
@@ -167,9 +177,6 @@ class WelcomePlugin(Star):
         except Exception as e:
             logger.error(f"处理入群欢迎事件出错: {e}")
 
-    # =========================================================
-    # 调试命令
-    # =========================================================
     @filter.command("welcome_show")
     async def welcome_show(
         self, event: AiocqhttpMessageEvent
@@ -195,9 +202,10 @@ class WelcomePlugin(Star):
 
         chain = []
         if image_url:
-            if image_url.startswith("http://") or image_url.startswith("https://"):
-                chain.append(Comp.Image.fromURL(image_url))
+            final_image = self._normalize_image_path(image_url)
+            if final_image.startswith("http://") or final_image.startswith("https://"):
+                chain.append(Comp.Image.fromURL(final_image))
             else:
-                chain.append(Comp.Image.fromFileSystem(image_url))
+                chain.append(Comp.Image.fromFileSystem(final_image))
         chain.append(Comp.Plain(f"[测试欢迎]\n{text}"))
         yield event.chain_result(chain)
