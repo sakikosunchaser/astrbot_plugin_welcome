@@ -33,7 +33,7 @@ high_priority_event = _high_priority(filter.event_message_type)
     "astrbot_plugin_welcome",
     "Sunchser",
     "一个简单的入群欢迎插件",
-    "v2.1.0",
+    "v2.1.1",
 )
 class WelcomePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -113,14 +113,41 @@ class WelcomePlugin(Star):
                 return rule
         return None
 
-    def _render_text(self, template: str, group_id: str, user_id: str) -> str:
-        user_name = user_id or "新朋友"
+    async def _get_user_display_name(
+        self, event: AiocqhttpMessageEvent, group_id: str, user_id: str
+    ) -> str:
+        """
+        优先取群名片(card)，其次昵称(nickname)，最后回退到 user_id
+        """
+        try:
+            info = await event.bot.get_group_member_info(
+                group_id=int(group_id),
+                user_id=int(user_id),
+                no_cache=True,
+            )
+            card = str(info.get("card", "") or "").strip()
+            nickname = str(info.get("nickname", "") or "").strip()
+
+            if card:
+                return card
+            if nickname:
+                return nickname
+        except Exception as e:
+            logger.warning(
+                f"[welcome] failed to get group member info, group_id={group_id}, user_id={user_id}, err={e}"
+            )
+
+        return str(user_id or "新朋友")
+
+    def _render_text(
+        self, template: str, group_id: str, user_id: str, user_name: str
+    ) -> str:
         text = template or "欢迎 {user_name} 加入本群~"
         return (
             text.replace("{group_id}", str(group_id or ""))
             .replace("{user_id}", str(user_id or ""))
-            .replace("{user_name}", str(user_name))
-            .replace("{nickname}", str(user_name))
+            .replace("{user_name}", str(user_name or "新朋友"))
+            .replace("{nickname}", str(user_name or "新朋友"))
         )
 
     def _normalize_image_path(self, image_url: str) -> str:
@@ -137,7 +164,7 @@ class WelcomePlugin(Star):
         plugin_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.abspath(os.path.join(plugin_dir, image_url))
 
-    def _build_chain(self, text: str, image_url: str = "") -> list:
+    def _build_chain(self, text: str, image_url: str = "", at_user_id: str = "") -> list:
         chain = []
 
         if image_url:
@@ -147,8 +174,15 @@ class WelcomePlugin(Star):
             else:
                 chain.append(Comp.Image.fromFileSystem(final_image))
 
+        if at_user_id:
+            chain.append(Comp.At(qq=int(at_user_id)))
+
         if text:
-            chain.append(Comp.Plain(text=text))
+            # 如果前面有 @，这里前面补个换行更自然
+            final_text = text
+            if at_user_id:
+                final_text = "\n" + final_text
+            chain.append(Comp.Plain(text=final_text))
 
         return chain
 
@@ -160,21 +194,15 @@ class WelcomePlugin(Star):
         self, event: AiocqhttpMessageEvent
     ) -> AsyncGenerator[MessageEventResult, None]:
         try:
-            logger.info("[welcome] handle_group_increase invoked")
-
             if not self._is_enabled():
-                logger.info("[welcome] plugin disabled")
                 return
 
             if not hasattr(event, "message_obj") or not hasattr(
                 event.message_obj, "raw_message"
             ):
-                logger.info("[welcome] event has no raw_message")
                 return
 
             raw_message = event.message_obj.raw_message
-            logger.info(f"[welcome] raw_message={raw_message}")
-
             if not raw_message or not isinstance(raw_message, dict):
                 return
 
@@ -185,28 +213,28 @@ class WelcomePlugin(Star):
                 group_id = str(raw_message.get("group_id", "") or "")
                 user_id = str(raw_message.get("user_id", "") or "")
 
-                logger.info(
-                    f"[welcome] group_increase detected, group_id={group_id}, user_id={user_id}"
-                )
-
                 if not group_id or not user_id:
                     return
 
                 rule = self._find_rule(group_id)
-                logger.info(f"[welcome] matched rule={rule}")
-
                 if not rule:
                     return
+
+                user_name = await self._get_user_display_name(event, group_id, user_id)
 
                 welcome_text = self._render_text(
                     str(rule.get("welcome_text", "") or ""),
                     group_id,
                     user_id,
+                    user_name,
                 )
                 image_url = str(rule.get("image_url", "") or "").strip()
 
-                chain = self._build_chain(welcome_text, image_url)
-                logger.info(f"[welcome] sending welcome chain={chain}")
+                chain = self._build_chain(
+                    text=welcome_text,
+                    image_url=image_url,
+                    at_user_id=user_id,
+                )
 
                 if chain:
                     yield event.chain_result(chain)
@@ -231,10 +259,14 @@ class WelcomePlugin(Star):
             yield event.plain_result(f"当前群 {group_id} 未配置欢迎规则。")
             return
 
+        test_user_id = "10000"
+        user_name = await self._get_user_display_name(event, group_id, test_user_id)
+
         welcome_text = self._render_text(
             str(rule.get("welcome_text", "") or ""),
             group_id,
-            "10000",
+            test_user_id,
+            user_name,
         )
         image_url = str(rule.get("image_url", "") or "").strip()
 
@@ -244,6 +276,10 @@ class WelcomePlugin(Star):
             f"image_url={image_url}"
         )
 
-        chain = self._build_chain(f"[测试欢迎]\n{welcome_text}", image_url)
+        chain = self._build_chain(
+            text=f"[测试欢迎]\n{welcome_text}",
+            image_url=image_url,
+            at_user_id=test_user_id,
+        )
         if chain:
             yield event.chain_result(chain)
